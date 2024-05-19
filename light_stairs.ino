@@ -1,5 +1,18 @@
+/*
+Created by: Timo Niemann
+Date: 18.05.2024
 
-// Address of bluetooth module HM-10 AC-BT-V4: B4994C57B886
+What is this programm doing:
+This programm lets you setup an array of lights, expandable at your descretion, DEFAULT would be 5V LEDs.
+The lights are turned on by setting pin 9 or 11 HIGH, the pins determine the direction of the flow.
+You can configure the Microcontroller by Bluetooth with simple isntructions.
+
+Usage:
+Please refer the pinouts by the defines i've taken, I will provide a schematic.
+
+Flash the software to a Board with an RP2040, the ESP32 should work too (not tested), why especially the RP2040,
+because I threaded and the RP2040 is a DualCore ARM Processor.
+*/
 
 //----------INCLUDE----------
 #include <stdlib.h>
@@ -8,12 +21,11 @@
 #include <pico/sync.h>
 
 //----------DEFINES----------
-
 #define DEFAULT_ONTIME_DELAY 20000
 #define DEFAULT_STAIR_LIGHT_DELAY 100 // 35
 #define DEFAULT_BRIGHTNESS 100
 
-// Lights
+// -> LIGHTS
 #define l01 0
 #define l02 1
 #define l03 2
@@ -28,14 +40,17 @@
 #define l12 28
 #define l13 29
 
-// Caller of lightmode (up- or downwards)
+// -> Sensorpins (up-/downwards)
 #define s_up 13
 #define s_dwn 11
 
-// Define new Serial pins for HC-05 Bluetooth Module
+// -> Define new Serial pins for HC-05 Bluetooth Module
 #define _RX 9
 #define _TX 10
 
+// END DEFINE
+
+// this enum contains all instructions which are able to be received via bluetooth
 enum INSTRUCTION{
   DIM = 0,
   STEP_D = 1,
@@ -47,11 +62,13 @@ enum INSTRUCTION{
   HELP = 7,
 };
 
+// simple struct to store one bluetooth package
 typedef struct _bt_packet{
-  INSTRUCTION instr;
-  int value;
+  INSTRUCTION instr;  // holds current instruction
+  int value;          // holds value if needed
 }BT_PACKET;
 
+// *lights is the array of the LED Pins 
 int *lights;
 int lights_array_length;
 
@@ -60,15 +77,24 @@ int ONTIME_DELAY = 20000;
 int STAIR_LIGHT_DELAY = 100;
 int BRIGHTNESS = 100;
 
+// to set new rx and tx pins for bluetooth
 SoftwareSerial SSerial(_RX, _TX);
+
+// threading specific defines
 volatile bool _SENSOR_IN_USE = false;
 critical_section_t cs;
 
+/**
+* turns the lights on one by one in the given direction
+*/
 void lights_on(int *lights, int direction) {
+  // TODO raise the lights to the brightness level
   switch (direction) {
     case -1:
       for (int i = 0; i < lights_array_length; i++) {
+        // set pins "HIGH" based on set BRIGHTNESS Level
         analogWrite(lights[i], HIGH * BRIGHTNESS);
+        // delay between each stairwaystep to light up
         delay(STAIR_LIGHT_DELAY);
       }
       break;
@@ -79,9 +105,9 @@ void lights_on(int *lights, int direction) {
       }
       break;
   }
-  // turn light on from the top down
-  // keep lights on for 20sec
+  // while one of the sensors is HIGH -> wait before turing lights of after delay 
   while(true){
+    // enter critical section for read of _SENSOR_IN_USE
     critical_section_enter_blocking(&cs);
     if(!_SENSOR_IN_USE){
       critical_section_exit(&cs);
@@ -89,10 +115,15 @@ void lights_on(int *lights, int direction) {
     }
     critical_section_exit(&cs);
   }
+  // Delays the lights after user is walking past sensor so he can walk with lights until at destination
   delay(ONTIME_DELAY);
+  // turns of the lights in the opposite direction
   kill_lights(lights, -direction);
 }
 
+/**
+* Turn off the lights in the given direction
+*/
 void kill_lights(int *lights, int direction) {
   //while(digitalRead(s_up) == HIGH || digitalRead(s_dwn) == HIGH){}
   switch (direction) {
@@ -111,6 +142,9 @@ void kill_lights(int *lights, int direction) {
   }
 }
 
+/**
+* sets the brightness level of the leds
+*/
 int dim_lights(BT_PACKET packet){
   if(packet.value < 0 || packet.value > 100){
     return -1;
@@ -119,6 +153,9 @@ int dim_lights(BT_PACKET packet){
   return 0;
 }
 
+/**
+* little caller function which is called infront of lights_on to determine the right direction
+*/
 void set_lights(int *lights) {
   if (digitalRead(s_up) == HIGH) {
     SSerial.println("Walking up!");
@@ -129,7 +166,11 @@ void set_lights(int *lights) {
   }
 }
 
+/**
+* Creates the light list lights
+*/
 int *create_light_list() {
+  // if you have more LEDs they need to be listed here also
   int lights[] = { l01, l02, l03, l04, l05, l06, l07, l08, l09, l10, l11, l12, l13 };
   // doesn't need to be freed, because on one side the program runs indefinitely and on the other the device is restarted
   int *ret = (int *)malloc(sizeof(lights));
@@ -141,16 +182,21 @@ int *create_light_list() {
   return ret;
 }
 
+/**
+* checks the sent isntruction via bluetooth, splits it up in INSTRUCTION and Value
+* handles the gotten instruction
+*/
 void check_bt(){
   BT_PACKET packet = {RUNNING, 0};
   long start_pause = 0;
   do{
     if(SSerial.available()){
-      String userinput = SSerial.readString();
-      int delimiter_index = userinput.indexOf(' ');
-      String instr = userinput.substring(0, delimiter_index);
-      instr.toLowerCase();
-      delimiter_index++;
+      // Get instructions
+      String userinput = SSerial.readString();                    // Read from bluetooth
+      int delimiter_index = userinput.indexOf(' ');               // get the space between isntruction and value
+      String instr = userinput.substring(0, delimiter_index);     // read until isntruction is over or end of string if delimiter_index < 0
+      instr.toLowerCase();                                        // convert to lower to ignore Lower- or Uppercase missspellings
+      delimiter_index++;                                          // do not start on whitespace for value, example 'dim 50' del_in would have been 3 which is the ' ' 
 
       if(instr.equals("dim")){
         packet.instr = DIM;
@@ -203,12 +249,21 @@ void check_bt(){
         SSerial.println("--------------------False Instruction!--------------------");
         SSerial.println("Try 'HELP'");
       }
+
+      // get value from string and pass to packet.value
       if(delimiter_index > 0){
         packet.value = (int)atol(userinput.substring(delimiter_index).c_str());
         String ret_val = "Value: " + packet.value;
         SSerial.println(ret_val.c_str());
       }
-      if(packet.instr == STEP_D){
+
+      // Handle Instructions
+      if(packet.instr == DIM){
+        if(dim_lights(packet) == -1){
+          SSerial.println("---ERROR-did not set value---");
+        }
+      }
+      else if(packet.instr == STEP_D){
         if(packet.value >= 0 && packet.value <= 5000){
           STAIR_LIGHT_DELAY = packet.value; 
           String ret_val = "Setting Delay to Value: " + packet.value;
@@ -223,7 +278,8 @@ void check_bt(){
         }
       }
       else if(packet.instr == PAUSE && packet.value > 0){
-        while (millis() - start_pause < packet.value * 1000 && packet.instr == PAUSE) {
+        // loop to get RESUME instruction or delay until the pause timer is finished
+        while (millis() - start_pause < (long unsigned int)packet.value * 1000 && packet.instr == PAUSE) {
           if (SSerial.available()) {
             String userinput = SSerial.readString();
             if (userinput.equalsIgnoreCase("resume")) {
@@ -232,7 +288,8 @@ void check_bt(){
               break;
             }
           }
-          delay(100); // Verhindert zu häufige Überprüfungen
+          // the user is likely not faster
+          delay(100);
         }
         if (packet.instr == PAUSE) { // Wenn immer noch pausiert, dann setzen auf RUNNING
         packet.instr = RUNNING;
@@ -242,14 +299,14 @@ void check_bt(){
   }
   while(packet.instr == PAUSE);
 
-  if(packet.instr == DIM){
-    if(dim_lights(packet) == -1){
-      SSerial.println("---ERROR-did not set value---");
-    }
-  }
+  // not neccessary but fancier
   packet.instr = RUNNING;
 }
 
+/**
+* this function runs on Core1
+* determines if sensor is in use, free from current programm state -> used to hold the lights HIGH until nobody is in front of one sensor (does not interrupt)
+*/
 void observe_sensors_thread(){
   while(true){
     if(digitalRead(s_up) == HIGH || digitalRead(s_dwn) == HIGH){
@@ -265,6 +322,9 @@ void observe_sensors_thread(){
   }
 }
 
+/**
+* Initializer Function so that the setup function is clean
+*/
 void _init() {
   SSerial.begin(9600);
   pinMode(l01, OUTPUT);
@@ -284,9 +344,6 @@ void _init() {
   pinMode(s_up, INPUT);
   pinMode(s_dwn, INPUT);
 
-  //pinMode(_RX, INPUT);
-  //pinMode(_TX, OUTPUT);
-
   lights = create_light_list();
 
   critical_section_init(&cs);
@@ -294,6 +351,7 @@ void _init() {
 
 void setup() {
   _init();
+  // gives Core1 the Task to observe the sensors
   multicore_launch_core1(observe_sensors_thread);
 }
 
