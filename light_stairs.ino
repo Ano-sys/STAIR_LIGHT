@@ -76,6 +76,7 @@ int lights_array_length;
 int ONTIME_DELAY = 20000;
 int STAIR_LIGHT_DELAY = 100;
 int BRIGHTNESS = 100;
+int BRIGHTNESS_STEP_D = 2;
 
 // to set new rx and tx pins for bluetooth
 SoftwareSerial SSerial(_RX, _TX);
@@ -93,14 +94,20 @@ void lights_on(int *lights, int direction) {
     case -1:
       for (int i = 0; i < lights_array_length; i++) {
         // set pins "HIGH" based on set BRIGHTNESS Level
-        analogWrite(lights[i], HIGH * BRIGHTNESS);
-        // delay between each stairwaystep to light up
+        for(int j = 0; j < BRIGHTNESS; j++){
+          analogWrite(lights[i], HIGH * j);
+          delay(BRIGHTNESS_STEP_D);
+        }
         delay(STAIR_LIGHT_DELAY);
+        // delay between each stairwaystep to light up
       }
       break;
     case 1:
       for (int i = lights_array_length - 1; i >= 0; i--) {
-        analogWrite(lights[i], HIGH * BRIGHTNESS);
+        for(int j = 0; j < BRIGHTNESS; j++){
+          analogWrite(lights[i], HIGH * j);
+          delay(BRIGHTNESS_STEP_D);
+        }
         delay(STAIR_LIGHT_DELAY);
       }
       break;
@@ -129,12 +136,20 @@ void kill_lights(int *lights, int direction) {
   switch (direction) {
     case -1:
       for (int i = lights_array_length - 1; i >= 0; i--) {
+        for(int j = BRIGHTNESS; j >= 0; j--){
+          analogWrite(lights[i], HIGH * j);
+          delay(BRIGHTNESS_STEP_D);
+        }
         digitalWrite(lights[i], LOW);
         delay(STAIR_LIGHT_DELAY);
       }
       break;
     case 1:
       for (int i = 0; i < lights_array_length; i++) {
+        for(int j = BRIGHTNESS; j >= 0; j--){
+          analogWrite(lights[i], HIGH * j);
+          delay(BRIGHTNESS_STEP_D);
+        }
         digitalWrite(lights[i], LOW);
         delay(STAIR_LIGHT_DELAY);
       }
